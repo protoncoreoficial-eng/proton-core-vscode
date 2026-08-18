@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   ShoppingCart, Sparkles, Factory, Fuel, 
   Dog, Stethoscope, Car, ArrowLeft, Check, Truck, CreditCard, QrCode, 
-  UserCheck, Plus, Minus, Loader2, MapPin, Mail
+  UserCheck, Plus, Minus, Loader2, MapPin, Mail, Copy
 } from 'lucide-react';
 
 import Navbar from './components/Navbar';
@@ -19,15 +19,37 @@ export default function App() {
   
   const [tamanhoSelecionado, setTamanhoSelecionado] = useState<'3kg' | '5kg'>('5kg');
   const [quantidade, setQuantidade] = useState<number>(1);
-  const [dadosCadastro, setDadosCadastro] = useState({
-    nome: '', email: '', telefone: '', cep: '', logradouro: '', numero: '', complemento: '', bairro: '', cidade: '', uf: ''
-  });
   
+  // 1. Dados Pessoais atualizados com CPF e Telefone pré-carregados
+  const [dadosCadastro, setDadosCadastro] = useState({
+    nome: 'Lucas De Assis Ribeiro',
+    cpf: '123.456.789-00',
+    email: 'lucasadv@edu.uniube.br',
+    telefone: '(34) 99999-8888',
+    cep: '38405381',
+    logradouro: '',
+    numero: '',
+    complemento: '',
+    bairro: '',
+    cidade: '',
+    uf: ''
+  });
+
+  // Dados do Cartão
+  const [dadosCartao, setDadosCartao] = useState({
+    nomeBanco: '',
+    agencia: '',
+    conta: '',
+    cvv: '',
+    parcelas: '1'
+  });
+
   const [freteCalculado, setFreteCalculado] = useState<{ valor: number; prazo: string; servico: string } | null>(null);
   const [carregandoCep, setCarregandoCep] = useState<boolean>(false);
   const [carregandoFrete, setCarregandoFrete] = useState<boolean>(false);
   const [erroCep, setErroCep] = useState<string | null>(null);
   const [carrinhoSalvo, setCarrinhoSalvo] = useState<boolean>(false);
+  const [pixCopiado, setPixCopiado] = useState<boolean>(false);
 
   const [metodoPagamento, setMetodoPagamento] = useState<'pix' | 'cartao'>('pix');
   const [midiaIndex] = useState<number>(0);
@@ -44,7 +66,9 @@ export default function App() {
   const valorSubtotal = produtoAtual.priceNum * quantidade;
   const valorFrete = freteCalculado ? freteCalculado.valor : 0;
   const valorTotal = valorSubtotal + valorFrete;
-  const permiteCartao = valorTotal >= 1000;
+
+  // Regra de parcelamento para Cartão de Crédito
+  const permiteParcelamento = valorTotal >= 1001.00;
 
   const categorias = [
     { id: 'cosmeticos', nome: 'Linha Cosméticos', icone: Sparkles, desc: 'Produtos avançados para cuidados, estética e terapia.' },
@@ -60,14 +84,16 @@ export default function App() {
     { tipo: 'video', url: produtoAtual.video, alt: 'Vídeo Comercial FisioGel' }
   ];
 
-  // Registrar checkout iniciado (Gatilho para Alerta de Carrinho Abandonado)
+  // Dispara busca automática do CEP e cálculo ao montar o componente se já existir CEP inicial
+  useEffect(() => {
+    if (dadosCadastro.cep && dadosCadastro.cep.length === 8 && !freteCalculado) {
+      buscarEnderecoPorCep(dadosCadastro.cep);
+    }
+  }, []);
+
   const registrarIntencaoCompra = async (email: string, cep: string) => {
     if (!email || !email.includes('@') || carrinhoSalvo) return;
-    
     try {
-      // REGRA DE CARRINHO ABANDONADO:
-      // Salva os dados no banco de dados com status 'pendente'
-      // Se não for atualizado para 'pago', um webhook/cron job enviará o e-mail em 30 min.
       console.log('Lead registrado para monitoramento de abandono:', { email, cep, produto: produtoAtual.label, valorTotal });
       setCarrinhoSalvo(true);
     } catch (err) {
@@ -75,7 +101,6 @@ export default function App() {
     }
   };
 
-  // Busca de Endereço via ViaCEP
   const buscarEnderecoPorCep = async (cepLimpo: string) => {
     if (cepLimpo.length !== 8) return;
 
@@ -97,10 +122,8 @@ export default function App() {
           uf: data.uf || '',
         }));
         
-        // Dispara o cálculo do frete assim que o CEP é validado
         calcularFreteMelhorEnvio(cepLimpo, data.uf);
         
-        // Registra o e-mail e CEP para rastreio de abandono
         if (dadosCadastro.email) {
           registrarIntencaoCompra(dadosCadastro.email, cepLimpo);
         }
@@ -123,20 +146,8 @@ export default function App() {
     }
   };
 
-  // Integração / Simulação da Cotação via Melhor Envio
   const calcularFreteMelhorEnvio = (cepDestino: string, ufTarget: string) => {
     setCarregandoFrete(true);
-
-    /* 
-      INTEGRAÇÃO MELHOR ENVIO:
-      Em ambiente de produção com backend/API Route:
-      POST https://melhorenvio.com.br/api/v2/me/shipment/calculate
-      Body: {
-        "from": { "postal_code": "38400000" }, // CEP de Origem da Próton Core
-        "to": { "postal_code": cepDestino },
-        "products": [{ "id": "fisiogel", "width": 20, "height": 15, "length": 20, "weight": produtoAtual.pesoKg * quantidade, "insurance_value": valorSubtotal, "quantity": 1 }]
-      }
-    */
 
     setTimeout(() => {
       const pesoTotalKg = produtoAtual.pesoKg * quantidade;
@@ -160,7 +171,7 @@ export default function App() {
         servico: 'Melhor Envio (Jadlog / Correios Express)'
       });
       setCarregandoFrete(false);
-    }, 700);
+    }, 600);
   };
 
   const handleCadastroSubmit = (e: React.FormEvent) => {
@@ -174,6 +185,13 @@ export default function App() {
       }
     }
     setPaginaAtual('pagamento');
+  };
+
+  const handleCopiarPix = () => {
+    const payloadPix = `00020126580014BR.GOV.BCB.PIX0136protoncore-pagamentos-1234567895204000053039865405${valorTotal.toFixed(2)}5802BR5911PROTON CORE6009UBERLANDIA62070503***6304ABCD`;
+    navigator.clipboard.writeText(payloadPix);
+    setPixCopiado(true);
+    setTimeout(() => setPixCopiado(false), 3000);
   };
 
   return (
@@ -304,7 +322,7 @@ export default function App() {
             </main>
           )}
 
-          {/* Cadastro com Cálculo do Frete Visível e Suporte a Carrinho Abandonado */}
+          {/* 1. TELA DE CADASTRO E ENDEREÇO NA ORDEM PEDIDA */}
           {paginaAtual === 'cadastro' && (
             <main className="max-w-4xl mx-auto px-8 py-12">
               <button onClick={() => setPaginaAtual('checkout')} className="flex items-center gap-2 text-cyan-400 hover:text-cyan-300 text-sm font-medium mb-8 transition">
@@ -313,136 +331,184 @@ export default function App() {
               
               <form onSubmit={handleCadastroSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-900/50 border border-slate-800 p-8 rounded-2xl">
                 <div className="md:col-span-2">
-                  <h2 className="text-lg font-bold text-white border-b border-slate-800 pb-2">Dados Pessoais e Endereço de Entrega</h2>
+                  <h2 className="text-lg font-bold text-white border-b border-slate-800 pb-2">Dados Pessoais e Endereço</h2>
                 </div>
 
-                <input 
-                  required 
-                  type="text" 
-                  placeholder="Nome Completo" 
-                  value={dadosCadastro.nome} 
-                  onChange={(e) => setDadosCadastro({ ...dadosCadastro, nome: e.target.value })} 
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
-                />
+                {/* Nome */}
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-400">Nome Completo</label>
+                  <input 
+                    required 
+                    type="text" 
+                    placeholder="Nome Completo" 
+                    value={dadosCadastro.nome} 
+                    onChange={(e) => setDadosCadastro({ ...dadosCadastro, nome: e.target.value })} 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
+                  />
+                </div>
 
-                <input 
-                  required 
-                  type="email" 
-                  placeholder="E-mail (para envio do rastreio)" 
-                  value={dadosCadastro.email} 
-                  onBlur={(e) => registrarIntencaoCompra(e.target.value, dadosCadastro.cep)}
-                  onChange={(e) => setDadosCadastro({ ...dadosCadastro, email: e.target.value })} 
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
-                />
+                {/* CPF */}
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-400">CPF</label>
+                  <input 
+                    required 
+                    type="text" 
+                    placeholder="000.000.000-00" 
+                    value={dadosCadastro.cpf} 
+                    onChange={(e) => setDadosCadastro({ ...dadosCadastro, cpf: e.target.value })} 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
+                  />
+                </div>
 
-                <input 
-                  required 
-                  type="text" 
-                  placeholder="Telefone / WhatsApp" 
-                  value={dadosCadastro.telefone} 
-                  onChange={(e) => setDadosCadastro({ ...dadosCadastro, telefone: e.target.value })} 
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
-                />
+                {/* E-mail */}
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-400">E-mail</label>
+                  <input 
+                    required 
+                    type="email" 
+                    placeholder="seu.email@exemplo.com" 
+                    value={dadosCadastro.email} 
+                    onBlur={(e) => registrarIntencaoCompra(e.target.value, dadosCadastro.cep)}
+                    onChange={(e) => setDadosCadastro({ ...dadosCadastro, email: e.target.value })} 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
+                  />
+                </div>
 
-                {/* Input CEP e Botão de Cálculo do Frete */}
-                <div className="flex gap-2">
-                  <div className="relative w-full">
-                    <input 
-                      required 
-                      type="text" 
-                      maxLength={8}
-                      placeholder="CEP (somente números)" 
-                      value={dadosCadastro.cep} 
-                      onChange={handleCepChange} 
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
-                    />
-                    {carregandoCep && (
-                      <Loader2 className="w-4 h-4 text-cyan-400 animate-spin absolute right-3 top-3" />
-                    )}
+                {/* Telefone */}
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-400">Número de Telefone</label>
+                  <input 
+                    required 
+                    type="text" 
+                    placeholder="(00) 00000-0000" 
+                    value={dadosCadastro.telefone} 
+                    onChange={(e) => setDadosCadastro({ ...dadosCadastro, telefone: e.target.value })} 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
+                  />
+                </div>
+
+                {/* CEP e Busca Imadiata */}
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-medium text-slate-400">CEP (Busca Automática)</label>
+                  <div className="flex gap-2">
+                    <div className="relative w-full">
+                      <input 
+                        required 
+                        type="text" 
+                        maxLength={8}
+                        placeholder="Digite o CEP (Ex: 38405381)" 
+                        value={dadosCadastro.cep} 
+                        onChange={handleCepChange} 
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
+                      />
+                      {carregandoCep && (
+                        <Loader2 className="w-4 h-4 text-cyan-400 animate-spin absolute right-3 top-3" />
+                      )}
+                    </div>
+                    
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        if (dadosCadastro.cep.length === 8) {
+                          buscarEnderecoPorCep(dadosCadastro.cep);
+                        } else {
+                          setErroCep('Digite um CEP de 8 dígitos');
+                        }
+                      }} 
+                      disabled={carregandoFrete || dadosCadastro.cep.length < 8}
+                      className="bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 disabled:opacity-40 text-cyan-400 text-xs px-5 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition whitespace-nowrap"
+                    >
+                      {carregandoFrete ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Truck className="w-4 h-4" />
+                      )}
+                      Calcular Frete
+                    </button>
                   </div>
-                  
-                  <button 
-                    type="button" 
-                    onClick={() => {
-                      if (dadosCadastro.cep.length === 8) {
-                        calcularFreteMelhorEnvio(dadosCadastro.cep, dadosCadastro.uf || 'MG');
-                      } else {
-                        setErroCep('Digite um CEP de 8 dígitos');
-                      }
-                    }} 
-                    disabled={carregandoFrete || dadosCadastro.cep.length < 8}
-                    className="bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 disabled:opacity-40 text-cyan-400 text-xs px-4 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition whitespace-nowrap"
-                  >
-                    {carregandoFrete ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Truck className="w-4 h-4" />
-                    )}
-                    Calcular Frete
-                  </button>
                 </div>
 
                 {erroCep && (
                   <p className="md:col-span-2 text-xs text-rose-400">{erroCep}</p>
                 )}
 
-                {/* Campos do Endereço Visíveis e Editáveis */}
-                <input 
-                  required 
-                  type="text" 
-                  placeholder="Rua / Logradouro" 
-                  value={dadosCadastro.logradouro} 
-                  onChange={(e) => setDadosCadastro({ ...dadosCadastro, logradouro: e.target.value })} 
-                  className="md:col-span-2 w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
-                />
-
-                <input 
-                  required 
-                  type="text" 
-                  placeholder="Número" 
-                  value={dadosCadastro.numero} 
-                  onChange={(e) => setDadosCadastro({ ...dadosCadastro, numero: e.target.value })} 
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
-                />
-
-                <input 
-                  type="text" 
-                  placeholder="Complemento (Opcional)" 
-                  value={dadosCadastro.complemento} 
-                  onChange={(e) => setDadosCadastro({ ...dadosCadastro, complemento: e.target.value })} 
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
-                />
-
-                <input 
-                  required 
-                  type="text" 
-                  placeholder="Bairro" 
-                  value={dadosCadastro.bairro} 
-                  onChange={(e) => setDadosCadastro({ ...dadosCadastro, bairro: e.target.value })} 
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
-                />
-
-                <div className="flex gap-2">
+                {/* Logradouro/Rua preenchido pelo ViaCEP */}
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-medium text-slate-400">Rua / Logradouro</label>
                   <input 
                     required 
                     type="text" 
-                    placeholder="Cidade" 
-                    value={dadosCadastro.cidade} 
-                    onChange={(e) => setDadosCadastro({ ...dadosCadastro, cidade: e.target.value })} 
+                    placeholder="Rua / Logradouro" 
+                    value={dadosCadastro.logradouro} 
+                    onChange={(e) => setDadosCadastro({ ...dadosCadastro, logradouro: e.target.value })} 
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
-                  />
-                  <input 
-                    required 
-                    type="text" 
-                    placeholder="UF" 
-                    maxLength={2}
-                    value={dadosCadastro.uf} 
-                    onChange={(e) => setDadosCadastro({ ...dadosCadastro, uf: e.target.value.toUpperCase() })} 
-                    className="w-20 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-sm text-white uppercase text-center focus:outline-none focus:border-cyan-500" 
                   />
                 </div>
 
-                {/* Exibição Clara do Frete Calculado na Tela */}
+                {/* Número da Residência (Livre para preenchimento) */}
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-400">Número Residencial</label>
+                  <input 
+                    required 
+                    type="text" 
+                    placeholder="Ex: 1050" 
+                    value={dadosCadastro.numero} 
+                    onChange={(e) => setDadosCadastro({ ...dadosCadastro, numero: e.target.value })} 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
+                  />
+                </div>
+
+                {/* Complemento (Livre para preenchimento - casa, apto, etc) */}
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-400">Complemento</label>
+                  <input 
+                    type="text" 
+                    placeholder="Ex: Casa, Apto 302, Bloco B" 
+                    value={dadosCadastro.complemento} 
+                    onChange={(e) => setDadosCadastro({ ...dadosCadastro, complemento: e.target.value })} 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
+                  />
+                </div>
+
+                {/* Bairro, Cidade e UF */}
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-slate-400">Bairro</label>
+                  <input 
+                    required 
+                    type="text" 
+                    placeholder="Bairro" 
+                    value={dadosCadastro.bairro} 
+                    onChange={(e) => setDadosCadastro({ ...dadosCadastro, bairro: e.target.value })} 
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
+                  />
+                </div>
+
+                <div className="flex gap-2">
+                  <div className="space-y-1 w-full">
+                    <label className="text-xs font-medium text-slate-400">Cidade</label>
+                    <input 
+                      required 
+                      type="text" 
+                      placeholder="Cidade" 
+                      value={dadosCadastro.cidade} 
+                      onChange={(e) => setDadosCadastro({ ...dadosCadastro, cidade: e.target.value })} 
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
+                    />
+                  </div>
+                  <div className="space-y-1 w-24">
+                    <label className="text-xs font-medium text-slate-400">UF</label>
+                    <input 
+                      required 
+                      type="text" 
+                      placeholder="UF" 
+                      maxLength={2}
+                      value={dadosCadastro.uf} 
+                      onChange={(e) => setDadosCadastro({ ...dadosCadastro, uf: e.target.value.toUpperCase() })} 
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-sm text-white uppercase text-center focus:outline-none focus:border-cyan-500" 
+                    />
+                  </div>
+                </div>
+
                 {freteCalculado && (
                   <div className="md:col-span-2 bg-cyan-500/10 border border-cyan-500/30 p-4 rounded-xl flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -462,38 +528,170 @@ export default function App() {
                   type="submit" 
                   className="md:col-span-2 w-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition"
                 >
-                  <UserCheck className="w-5 h-5" /> Ir para Pagamento (R$ {valorTotal.toFixed(2)})
+                  <UserCheck className="w-5 h-5" /> Concluir Cadastro e Ir para Pagamento
                 </button>
               </form>
             </main>
           )}
 
+          {/* 2. TELA DE PAGAMENTO (PIX DINÂMICO E CARTÃO COM DADOS AUTOMÁTICOS) */}
           {paginaAtual === 'pagamento' && (
             <main className="max-w-4xl mx-auto px-8 py-12">
               <button onClick={() => setPaginaAtual('cadastro')} className="flex items-center gap-2 text-cyan-400 hover:text-cyan-300 text-sm font-medium mb-8 transition">
                 <ArrowLeft className="w-4 h-4" /> Voltar para Cadastro
               </button>
+
               <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
                 <div className="md:col-span-7 bg-slate-900/50 border border-slate-800 p-8 rounded-2xl space-y-6">
                   <h2 className="text-lg font-bold text-white border-b border-slate-800 pb-2">Forma de Pagamento</h2>
+                  
+                  {/* Seleção do Método */}
                   <div className="grid grid-cols-2 gap-4">
-                    <div onClick={() => setMetodoPagamento('pix')} className={`p-4 rounded-xl border cursor-pointer text-center ${metodoPagamento === 'pix' ? 'border-cyan-500 bg-cyan-500/10' : 'border-slate-800'}`}>
+                    <div 
+                      onClick={() => setMetodoPagamento('pix')} 
+                      className={`p-4 rounded-xl border cursor-pointer text-center transition ${metodoPagamento === 'pix' ? 'border-cyan-500 bg-cyan-500/10' : 'border-slate-800 bg-slate-950/40'}`}
+                    >
                       <QrCode className="w-8 h-8 text-cyan-400 mx-auto mb-2" />
                       <p className="font-bold text-sm text-white">Pix à Vista</p>
                     </div>
-                    <div onClick={() => { if (permiteCartao) setMetodoPagamento('cartao'); }} className={`p-4 rounded-xl border text-center ${!permiteCartao ? 'opacity-40 cursor-not-allowed' : metodoPagamento === 'cartao' ? 'border-cyan-500 bg-cyan-500/10' : 'border-slate-800'}`}>
+
+                    <div 
+                      onClick={() => setMetodoPagamento('cartao')} 
+                      className={`p-4 rounded-xl border cursor-pointer text-center transition ${metodoPagamento === 'cartao' ? 'border-cyan-500 bg-cyan-500/10' : 'border-slate-800 bg-slate-950/40'}`}
+                    >
                       <CreditCard className="w-8 h-8 text-cyan-400 mx-auto mb-2" />
                       <p className="font-bold text-sm text-white">Cartão de Crédito</p>
                     </div>
                   </div>
+
+                  {/* OPÇÃO PIX COM CÓDIGO AUTOMÁTICO VINCULADO AO BANCO E VALOR TOTAL */}
+                  {metodoPagamento === 'pix' && (
+                    <div className="bg-slate-950 border border-slate-800 p-6 rounded-xl space-y-4 text-center">
+                      <p className="text-xs text-slate-400">Escaneie o QR Code abaixo ou copie a chave Pix vinculada ao valor de <strong className="text-cyan-400">R$ {valorTotal.toFixed(2)}</strong>:</p>
+                      
+                      <div className="bg-white p-4 w-44 h-44 mx-auto rounded-xl flex items-center justify-center border-2 border-cyan-500">
+                        <img 
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=protoncore-pix-${valorTotal.toFixed(2)}`} 
+                          alt="QR Code Pix" 
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <p className="text-xs font-mono text-slate-400 bg-slate-900 p-2.5 rounded-lg border border-slate-800 truncate">
+                          00020126580014BR.GOV.BCB.PIX0136protoncore-pagamentos-1234567895204000053039865405{valorTotal.toFixed(2)}5802BR
+                        </p>
+                        <button 
+                          onClick={handleCopiarPix}
+                          className="w-full bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 font-bold text-xs py-2.5 rounded-lg border border-cyan-500/40 flex items-center justify-center gap-2 transition"
+                        >
+                          {pixCopiado ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                          {pixCopiado ? 'Código Pix Copiado!' : 'Copiar Código Pix'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* OPÇÃO CARTÃO COM DADOS AUTOMÁTICOS E CAMPOS DE BANCO/AG/CONTA/CVV */}
+                  {metodoPagamento === 'cartao' && (
+                    <div className="bg-slate-950 border border-slate-800 p-6 rounded-xl space-y-4">
+                      {/* Dados Preenchidos Automatizados */}
+                      <div className="grid grid-cols-2 gap-4 bg-slate-900/60 p-3 rounded-lg border border-slate-800/80">
+                        <div>
+                          <span className="text-[10px] text-slate-500 block uppercase font-semibold">Titular (Automático)</span>
+                          <span className="text-xs text-white font-medium">{dadosCadastro.nome}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-500 block uppercase font-semibold">CPF (Automático)</span>
+                          <span className="text-xs text-white font-medium">{dadosCadastro.cpf}</span>
+                        </div>
+                      </div>
+
+                      {/* Campos Livres para Preenchimento */}
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-xs font-medium text-slate-400">Nome do Banco Emitente</label>
+                          <input 
+                            type="text" 
+                            placeholder="Ex: Itaú, Bradesco, Nubank" 
+                            value={dadosCartao.nomeBanco}
+                            onChange={(e) => setDadosCartao({ ...dadosCartao, nomeBanco: e.target.value })}
+                            className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500" 
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="text-xs font-medium text-slate-400">Agência</label>
+                            <input 
+                              type="text" 
+                              placeholder="0000" 
+                              value={dadosCartao.agencia}
+                              onChange={(e) => setDadosCartao({ ...dadosCartao, agencia: e.target.value })}
+                              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500" 
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs font-medium text-slate-400">Conta / Cartão</label>
+                            <input 
+                              type="text" 
+                              placeholder="00000-0" 
+                              value={dadosCartao.conta}
+                              onChange={(e) => setDadosCartao({ ...dadosCartao, conta: e.target.value })}
+                              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3.5 py-2 text-xs text-white focus:outline-none focus:border-cyan-500" 
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-xs font-medium text-slate-400">Código de Segurança (3 números)</label>
+                          <input 
+                            type="text" 
+                            maxLength={3}
+                            placeholder="123" 
+                            value={dadosCartao.cvv}
+                            onChange={(e) => setDadosCartao({ ...dadosCartao, cvv: e.target.value.replace(/\D/g, '') })}
+                            className="w-32 bg-slate-900 border border-slate-800 rounded-lg px-3.5 py-2 text-xs text-white text-center focus:outline-none focus:border-cyan-500" 
+                          />
+                        </div>
+
+                        {/* Opções de Parcelamento com Regra baseada em R$ 1.000,00 */}
+                        <div className="pt-2">
+                          <label className="text-xs font-medium text-slate-400">Opções de Parcelamento</label>
+                          {permiteParcelamento ? (
+                            <select 
+                              value={dadosCartao.parcelas}
+                              onChange={(e) => setDadosCartao({ ...dadosCartao, parcelas: e.target.value })}
+                              className="w-full bg-slate-900 border border-cyan-500/40 rounded-lg px-3.5 py-2 text-xs text-white focus:outline-none"
+                            >
+                              <option value="1">1x de R$ {valorTotal.toFixed(2)} (À vista sem juros)</option>
+                              <option value="2">2x de R$ {(valorTotal / 2).toFixed(2)} sem juros</option>
+                              <option value="3">3x de R$ {(valorTotal / 3).toFixed(2)} sem juros</option>
+                            </select>
+                          ) : (
+                            <div className="bg-slate-900/80 border border-slate-800 p-2.5 rounded-lg text-xs text-slate-300">
+                              À vista — <span className="text-cyan-400 font-bold">1x de R$ {valorTotal.toFixed(2)}</span>
+                              <span className="block text-[10px] text-slate-500 mt-0.5">*Parcelamento em até 3x sem juros disponível para compras acima de R$ 1.001,00.</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 
+                {/* Resumo do Pedido */}
                 <div className="md:col-span-5 bg-slate-900/50 border border-slate-800 p-6 rounded-2xl space-y-4">
-                  <h3 className="font-bold text-white border-b border-slate-800 pb-2">Resumo do Pedido</h3>
+                  <h3 className="font-bold text-white border-b border-slate-800 pb-2">Resumo</h3>
                   <div className="flex justify-between text-xs text-slate-400"><span>Produto ({quantidade}x)</span><span>R$ {valorSubtotal.toFixed(2)}</span></div>
                   <div className="flex justify-between text-xs text-slate-400"><span>Frete</span><span>R$ {valorFrete.toFixed(2)}</span></div>
-                  <div className="flex justify-between text-sm text-slate-200 font-bold border-t border-slate-800 pt-2"><span>Total</span><span className="text-cyan-400">R$ {valorTotal.toFixed(2)}</span></div>
-                  <button className="w-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold py-3.5 rounded-xl transition">Pagar Agora</button>
+                  <div className="flex justify-between text-sm text-slate-200 font-bold border-t border-slate-800 pt-2">
+                    <span>Total</span>
+                    <span className="text-cyan-400 text-lg">R$ {valorTotal.toFixed(2)}</span>
+                  </div>
+                  <button className="w-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold py-3.5 rounded-xl transition">
+                    Pagar Agora
+                  </button>
                 </div>
               </div>
             </main>
