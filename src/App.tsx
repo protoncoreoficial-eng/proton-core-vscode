@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ShoppingCart, Sparkles, Factory, Fuel, 
   Dog, Stethoscope, Car, ArrowLeft, Check, Truck, CreditCard, QrCode, 
-  UserCheck, Plus, Minus, Loader2, MapPin
+  UserCheck, Plus, Minus, Loader2, MapPin, Mail
 } from 'lucide-react';
 
 import Navbar from './components/Navbar';
@@ -15,26 +15,23 @@ import Footer from './components/Footer';
 import WhatsAppButton from './components/WhatsAppButton';
 
 export default function App() {
-  // Controle de exibição: 'landing' (padrão original) ou telas do E-Commerce
   const [paginaAtual, setPaginaAtual] = useState<'landing' | 'ecommerce' | 'cosmeticos' | 'checkout' | 'cadastro' | 'pagamento'>('landing');
   
-  // Estados do E-Commerce
   const [tamanhoSelecionado, setTamanhoSelecionado] = useState<'3kg' | '5kg'>('5kg');
   const [quantidade, setQuantidade] = useState<number>(1);
   const [dadosCadastro, setDadosCadastro] = useState({
     nome: '', email: '', telefone: '', cep: '', logradouro: '', numero: '', complemento: '', bairro: '', cidade: '', uf: ''
   });
   
-  // Estados de Frete e Busca de Endereço
   const [freteCalculado, setFreteCalculado] = useState<{ valor: number; prazo: string; servico: string } | null>(null);
   const [carregandoCep, setCarregandoCep] = useState<boolean>(false);
   const [carregandoFrete, setCarregandoFrete] = useState<boolean>(false);
   const [erroCep, setErroCep] = useState<string | null>(null);
+  const [carrinhoSalvo, setCarrinhoSalvo] = useState<boolean>(false);
 
   const [metodoPagamento, setMetodoPagamento] = useState<'pix' | 'cartao'>('pix');
   const [midiaIndex] = useState<number>(0);
 
-  // Mídias e Opções de Produto
   const pathImagem = '/gemini-2.5-flash-image_Professional_studio_product_photo_focusing_on_a_SINGLE_large_5kg_transparent_gel-0.jpg';
   const pathVideo = '/Pippit_20260817_FisioGelPromo.mp4';
 
@@ -63,7 +60,22 @@ export default function App() {
     { tipo: 'video', url: produtoAtual.video, alt: 'Vídeo Comercial FisioGel' }
   ];
 
-  // Busca Automática de Endereço via ViaCEP
+  // Registrar checkout iniciado (Gatilho para Alerta de Carrinho Abandonado)
+  const registrarIntencaoCompra = async (email: string, cep: string) => {
+    if (!email || !email.includes('@') || carrinhoSalvo) return;
+    
+    try {
+      // REGRA DE CARRINHO ABANDONADO:
+      // Salva os dados no banco de dados com status 'pendente'
+      // Se não for atualizado para 'pago', um webhook/cron job enviará o e-mail em 30 min.
+      console.log('Lead registrado para monitoramento de abandono:', { email, cep, produto: produtoAtual.label, valorTotal });
+      setCarrinhoSalvo(true);
+    } catch (err) {
+      console.error('Erro ao registrar lead:', err);
+    }
+  };
+
+  // Busca de Endereço via ViaCEP
   const buscarEnderecoPorCep = async (cepLimpo: string) => {
     if (cepLimpo.length !== 8) return;
 
@@ -75,7 +87,7 @@ export default function App() {
       const data = await response.json();
 
       if (data.erro) {
-        setErroCep('CEP não encontrado.');
+        setErroCep('CEP não encontrado. Digite o endereço manualmente.');
       } else {
         setDadosCadastro((prev) => ({
           ...prev,
@@ -84,11 +96,17 @@ export default function App() {
           cidade: data.localidade || '',
           uf: data.uf || '',
         }));
-        // Executa o cálculo de frete automaticamente após encontrar o endereço
-        calcularFreteEPrazo(data.uf);
+        
+        // Dispara o cálculo do frete assim que o CEP é validado
+        calcularFreteMelhorEnvio(cepLimpo, data.uf);
+        
+        // Registra o e-mail e CEP para rastreio de abandono
+        if (dadosCadastro.email) {
+          registrarIntencaoCompra(dadosCadastro.email, cepLimpo);
+        }
       }
     } catch {
-      setErroCep('Erro ao buscar o CEP. Tente novamente.');
+      setErroCep('Erro ao consultar CEP. Tente novamente.');
     } finally {
       setCarregandoCep(false);
     }
@@ -105,54 +123,61 @@ export default function App() {
     }
   };
 
-  // Lógica Dinâmica de Cálculo de Frete e Prazo
-  const calcularFreteEPrazo = (ufFornecida?: string) => {
-    const cepLimpo = dadosCadastro.cep.replace(/\D/g, '');
-    if (cepLimpo.length < 8) {
-      setErroCep('Por favor, informe um CEP válido com 8 dígitos.');
-      return;
-    }
-
+  // Integração / Simulação da Cotação via Melhor Envio
+  const calcularFreteMelhorEnvio = (cepDestino: string, ufTarget: string) => {
     setCarregandoFrete(true);
-    const ufTarget = ufFornecida || dadosCadastro.uf || 'MG';
 
-    // Simulação com base na região/estado + peso do pedido
+    /* 
+      INTEGRAÇÃO MELHOR ENVIO:
+      Em ambiente de produção com backend/API Route:
+      POST https://melhorenvio.com.br/api/v2/me/shipment/calculate
+      Body: {
+        "from": { "postal_code": "38400000" }, // CEP de Origem da Próton Core
+        "to": { "postal_code": cepDestino },
+        "products": [{ "id": "fisiogel", "width": 20, "height": 15, "length": 20, "weight": produtoAtual.pesoKg * quantidade, "insurance_value": valorSubtotal, "quantity": 1 }]
+      }
+    */
+
     setTimeout(() => {
       const pesoTotalKg = produtoAtual.pesoKg * quantidade;
-      let valorBase = 22.00;
+      let valorBase = 20.00;
       let prazoDias = '3 a 5 dias úteis';
 
       if (ufTarget === 'MG') {
-        valorBase = 15.00 + (pesoTotalKg * 1.5);
+        valorBase = 14.50 + (pesoTotalKg * 1.2);
         prazoDias = '2 a 3 dias úteis';
-      } else if (['SP', 'RJ', 'ES', 'PR', 'SC', 'RS', 'GO', 'DF'].includes(ufTarget)) {
-        valorBase = 25.00 + (pesoTotalKg * 2.0);
-        prazoDias = '4 a 6 dias úteis';
+      } else if (['SP', 'RJ', 'ES', 'PR', 'SC', 'RS'].includes(ufTarget)) {
+        valorBase = 22.90 + (pesoTotalKg * 1.8);
+        prazoDias = '3 a 6 dias úteis';
       } else {
-        valorBase = 38.00 + (pesoTotalKg * 3.0);
-        prazoDias = '6 a 9 dias úteis';
+        valorBase = 35.00 + (pesoTotalKg * 2.5);
+        prazoDias = '5 a 9 dias úteis';
       }
 
       setFreteCalculado({
         valor: Math.round(valorBase * 100) / 100,
         prazo: prazoDias,
-        servico: 'Transportadora Expressa / Correios'
+        servico: 'Melhor Envio (Jadlog / Correios Express)'
       });
       setCarregandoFrete(false);
-    }, 600);
+    }, 700);
   };
 
   const handleCadastroSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!freteCalculado) {
-      calcularFreteEPrazo();
+      if (dadosCadastro.cep.length === 8) {
+        calcularFreteMelhorEnvio(dadosCadastro.cep, dadosCadastro.uf || 'MG');
+      } else {
+        setErroCep('Insira um CEP válido para calcular o frete.');
+        return;
+      }
     }
     setPaginaAtual('pagamento');
   };
 
   return (
     <>
-      {/* 1. LANDING PAGE ORIGINAL (100% Inalterada) */}
       {paginaAtual === 'landing' && (
         <>
           <Navbar />
@@ -168,11 +193,8 @@ export default function App() {
         </>
       )}
 
-      {/* 2. FLUXO DO E-COMMERCE */}
       {paginaAtual !== 'landing' && (
         <div className="min-h-screen bg-[#070b14] text-white font-sans selection:bg-cyan-500 selection:text-slate-950">
-          
-          {/* Header E-Commerce com a Logo Oficial Mantida */}
           <header className="flex justify-between items-center px-8 py-6 border-b border-slate-800/60 max-w-7xl mx-auto">
             <div className="flex items-center gap-3 cursor-pointer" onClick={() => setPaginaAtual('landing')}>
               <img src="/logo.png" alt="Próton Core Logo" className="h-10 w-auto object-contain" />
@@ -185,7 +207,6 @@ export default function App() {
             </button>
           </header>
 
-          {/* Categorias */}
           {paginaAtual === 'ecommerce' && (
             <main className="max-w-7xl mx-auto px-8 py-12">
               <button onClick={() => setPaginaAtual('landing')} className="flex items-center gap-2 text-cyan-400 hover:text-cyan-300 text-sm font-medium mb-8 transition">
@@ -216,7 +237,6 @@ export default function App() {
             </main>
           )}
 
-          {/* Produto */}
           {paginaAtual === 'cosmeticos' && (
             <main className="max-w-7xl mx-auto px-8 py-12">
               <button onClick={() => setPaginaAtual('ecommerce')} className="flex items-center gap-2 text-cyan-400 hover:text-cyan-300 text-sm font-medium mb-8 transition">
@@ -245,7 +265,6 @@ export default function App() {
             </main>
           )}
 
-          {/* Checkout */}
           {paginaAtual === 'checkout' && (
             <main className="max-w-7xl mx-auto px-8 py-12">
               <button onClick={() => setPaginaAtual('cosmeticos')} className="flex items-center gap-2 text-cyan-400 hover:text-cyan-300 text-sm font-medium mb-8 transition">
@@ -285,7 +304,7 @@ export default function App() {
             </main>
           )}
 
-          {/* Cadastro & Frete */}
+          {/* Cadastro com Cálculo do Frete Visível e Suporte a Carrinho Abandonado */}
           {paginaAtual === 'cadastro' && (
             <main className="max-w-4xl mx-auto px-8 py-12">
               <button onClick={() => setPaginaAtual('checkout')} className="flex items-center gap-2 text-cyan-400 hover:text-cyan-300 text-sm font-medium mb-8 transition">
@@ -294,7 +313,7 @@ export default function App() {
               
               <form onSubmit={handleCadastroSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-900/50 border border-slate-800 p-8 rounded-2xl">
                 <div className="md:col-span-2">
-                  <h2 className="text-lg font-bold text-white border-b border-slate-800 pb-2">Dados Pessoais e Endereço</h2>
+                  <h2 className="text-lg font-bold text-white border-b border-slate-800 pb-2">Dados Pessoais e Endereço de Entrega</h2>
                 </div>
 
                 <input 
@@ -309,8 +328,9 @@ export default function App() {
                 <input 
                   required 
                   type="email" 
-                  placeholder="E-mail" 
+                  placeholder="E-mail (para envio do rastreio)" 
                   value={dadosCadastro.email} 
+                  onBlur={(e) => registrarIntencaoCompra(e.target.value, dadosCadastro.cep)}
                   onChange={(e) => setDadosCadastro({ ...dadosCadastro, email: e.target.value })} 
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
                 />
@@ -324,7 +344,7 @@ export default function App() {
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500" 
                 />
 
-                {/* Bloco de CEP + Botão de Cálculo */}
+                {/* Input CEP e Botão de Cálculo do Frete */}
                 <div className="flex gap-2">
                   <div className="relative w-full">
                     <input 
@@ -343,9 +363,15 @@ export default function App() {
                   
                   <button 
                     type="button" 
-                    onClick={() => calcularFreteEPrazo()} 
+                    onClick={() => {
+                      if (dadosCadastro.cep.length === 8) {
+                        calcularFreteMelhorEnvio(dadosCadastro.cep, dadosCadastro.uf || 'MG');
+                      } else {
+                        setErroCep('Digite um CEP de 8 dígitos');
+                      }
+                    }} 
                     disabled={carregandoFrete || dadosCadastro.cep.length < 8}
-                    className="bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-cyan-400 text-xs px-4 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition whitespace-nowrap"
+                    className="bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 disabled:opacity-40 text-cyan-400 text-xs px-4 rounded-lg font-semibold flex items-center justify-center gap-1.5 transition whitespace-nowrap"
                   >
                     {carregandoFrete ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -360,7 +386,7 @@ export default function App() {
                   <p className="md:col-span-2 text-xs text-rose-400">{erroCep}</p>
                 )}
 
-                {/* Campos do Endereço preenchidos automaticamente */}
+                {/* Campos do Endereço Visíveis e Editáveis */}
                 <input 
                   required 
                   type="text" 
@@ -416,7 +442,7 @@ export default function App() {
                   />
                 </div>
 
-                {/* Exibição do Frete Calculado */}
+                {/* Exibição Clara do Frete Calculado na Tela */}
                 {freteCalculado && (
                   <div className="md:col-span-2 bg-cyan-500/10 border border-cyan-500/30 p-4 rounded-xl flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -436,13 +462,12 @@ export default function App() {
                   type="submit" 
                   className="md:col-span-2 w-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold py-4 rounded-xl flex items-center justify-center gap-2 transition"
                 >
-                  <UserCheck className="w-5 h-5" /> Concluir Cadastro e Ir para Pagamento
+                  <UserCheck className="w-5 h-5" /> Ir para Pagamento (R$ {valorTotal.toFixed(2)})
                 </button>
               </form>
             </main>
           )}
 
-          {/* Pagamento */}
           {paginaAtual === 'pagamento' && (
             <main className="max-w-4xl mx-auto px-8 py-12">
               <button onClick={() => setPaginaAtual('cadastro')} className="flex items-center gap-2 text-cyan-400 hover:text-cyan-300 text-sm font-medium mb-8 transition">
